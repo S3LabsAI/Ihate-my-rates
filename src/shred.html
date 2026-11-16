@@ -1,0 +1,180 @@
+<!-- shred:start (scroll-driven sliced-letter headlines; source in src/shred.html) -->
+<style>
+html,body{overflow-x:clip}
+.shred-js [data-shred]:not(.shred-built),[data-shred].shred-on{-webkit-text-fill-color:transparent}
+[data-shred]{position:relative}
+.shred-layer{position:absolute;inset:0;pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-text-fill-color:currentColor;display:none}
+.shred-on>.shred-layer{display:block}
+.shred-c{position:absolute;white-space:pre;letter-spacing:0}
+.shred-s{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 50%;backface-visibility:hidden}
+</style>
+<script>
+(function(){
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !document.createRange) return;
+  var root = document.documentElement;
+  root.classList.add('shred-js');
+  // If anything below fails, never leave a headline invisible.
+  var failsafe = setTimeout(function(){ if (!items.length) root.classList.remove('shred-js'); }, 4000);
+
+  var items = [];           // {el, layer, slices[], cur, target, hero, w}
+  var t0 = 0;               // hero intro start time
+  var INTRO_MS = 1500;
+  var raf = 0;
+
+  function rand(seed){ var x = Math.sin(seed * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+  function clamp(v){ return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function ease(t){ return 1 - Math.pow(1 - t, 3); }
+
+  function build(el){
+    var old = find(el);
+    if (old) { if (old.layer.parentNode) old.layer.remove(); items.splice(items.indexOf(old), 1); }
+    el.classList.remove('shred-on');
+    var hr = el.getBoundingClientRect();
+    if (!hr.width) return;
+    var layer = document.createElement('span');
+    layer.className = 'shred-layer';
+    layer.setAttribute('aria-hidden', 'true');
+    var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    var range = document.createRange(), chars = [], node;
+    while ((node = walker.nextNode())) {
+      var txt = node.nodeValue, color = getComputedStyle(node.parentElement).color;
+      for (var i = 0; i < txt.length; i++) {
+        if (/\s/.test(txt[i])) continue;
+        range.setStart(node, i); range.setEnd(node, i + 1);
+        var r = range.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        chars.push({ ch: txt[i], x: r.left - hr.left, y: r.top - hr.top, w: r.width, h: r.height, color: color,
+                     upper: getComputedStyle(node.parentElement).textTransform === 'uppercase' });
+      }
+    }
+    if (!chars.length) return;
+    var vw = root.clientWidth, slices = [], n = chars.length;
+    chars.forEach(function(c, ci){
+      var cs = document.createElement('span');
+      cs.className = 'shred-c';
+      cs.style.cssText = 'left:' + c.x + 'px;top:' + c.y + 'px;width:' + c.w + 'px;height:' + c.h + 'px;line-height:' + c.h + 'px;color:' + c.color;
+      var k = Math.max(8, Math.min(20, Math.round(c.h / 7))), sh = c.h / k;
+      for (var s = 0; s < k; s++) {
+        var sl = document.createElement('span');
+        sl.className = 'shred-s';
+        sl.textContent = c.ch;
+        var top = Math.max(0, s * sh - 0.4), bot = Math.max(0, c.h - (s + 1) * sh - 0.4);
+        sl.style.clipPath = 'inset(' + top.toFixed(2) + 'px -0.3em ' + bot.toFixed(2) + 'px -0.3em)';
+        var seed = ci * 31 + s * 7 + n;
+        var dir = ((s + ci) % 2) ? 1 : -1;
+        slices.push({
+          el: sl,
+          dx: dir * (0.5 + rand(seed) * 0.8) * vw,
+          delay: (ci / n) * 0.3 + rand(seed + 1) * 0.2,
+          streak: 1.5 + rand(seed + 2) * 3.5
+        });
+        cs.appendChild(sl);
+      }
+      layer.appendChild(cs);
+    });
+    el.appendChild(layer);
+    el.classList.add('shred-built');
+    var it = { el: el, layer: layer, slices: slices, cur: -1, target: 0, hero: el.getAttribute('data-shred') === 'hero', w: hr.width };
+    items.push(it);
+    clearTimeout(failsafe);
+    if (it.hero && !t0) t0 = performance.now();
+    kick();
+  }
+
+  function find(el){ for (var i = 0; i < items.length; i++) if (items[i].el === el) return items[i]; return null; }
+
+  function targetFor(it, now){
+    var vh = window.innerHeight;
+    if (it.hero) {
+      var intro = clamp((now - t0) / INTRO_MS);
+      var out = 1 - clamp((window.scrollY - vh * 0.1) / (vh * 0.6));
+      return Math.min(intro, out);
+    }
+    var r = it.el.getBoundingClientRect();
+    var maxScroll = Math.max(0, root.scrollHeight - vh);
+    var lowest = r.top - (maxScroll - window.scrollY);       // top edge when the page is scrolled to the end
+    var end = Math.max(vh * 0.42, lowest + vh * 0.06);
+    var start = Math.max(vh * 0.97, end + vh * 0.35);
+    return clamp((start - r.top) / (start - end));
+  }
+
+  function paint(it){
+    var p = it.cur, done = p >= 0.9995;
+    it.el.classList.toggle('shred-on', !done);
+    if (done) return;
+    for (var i = 0; i < it.slices.length; i++) {
+      var s = it.slices[i];
+      var q = ease(clamp((p - s.delay) / 0.5)), inv = 1 - q;
+      s.el.style.transform = 'translate3d(' + (s.dx * inv).toFixed(1) + 'px,0,0) scaleX(' + (1 + s.streak * inv).toFixed(3) + ')';
+      s.el.style.opacity = q < 0.25 ? (q * 4).toFixed(3) : '1';
+    }
+  }
+
+  function tick(now){
+    raf = 0;
+    var busy = false;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!it.layer.isConnected) { queueScan(); continue; }
+      it.target = targetFor(it, now);
+      var introRunning = it.hero && now - t0 < INTRO_MS;
+      var next = it.cur < 0 ? it.target : (introRunning ? it.target : it.cur + (it.target - it.cur) * 0.16);
+      if (Math.abs(next - it.target) < 0.0008) next = it.target;
+      if (next !== it.cur) { it.cur = next; paint(it); }
+      if (it.cur !== it.target || introRunning) busy = true;
+    }
+    if (busy) kick();
+  }
+  function kick(){ if (!raf) raf = requestAnimationFrame(tick); }
+
+  var scanTimer = 0;
+  function queueScan(){ clearTimeout(scanTimer); scanTimer = setTimeout(scan, 60); }
+  // The x-dc runtime drops unknown attributes, so the headlines are found by content and tagged here.
+  var TARGETS = /^(cheap rate\.|how we\s*shop it\.|low price\.)/i;
+  function tag(){
+    var h1 = document.querySelector('h1');
+    if (h1 && !h1.hasAttribute('data-shred')) h1.setAttribute('data-shred', 'hero');
+    var h2 = document.querySelectorAll('h2:not([data-shred])');
+    for (var i = 0; i < h2.length; i++) if (TARGETS.test(h2[i].textContent.trim())) h2[i].setAttribute('data-shred', 'scroll');
+    return !!h1;
+  }
+  function scan(){
+    tag();
+    var els = document.querySelectorAll('[data-shred]');
+    for (var i = 0; i < els.length; i++) {
+      var it = find(els[i]);
+      if (!it || !it.layer.isConnected) { build(els[i]); ro && ro.observe(els[i]); }
+    }
+  }
+  var ro = window.ResizeObserver ? new ResizeObserver(function(entries){
+    for (var i = 0; i < entries.length; i++) {
+      var it = find(entries[i].target);
+      if (it && Math.abs(entries[i].contentRect.width - it.w) > 0.5) { var c = it.cur; build(it.el); var nw = find(it.el); if (nw) { nw.cur = c; paint(nw); } }
+    }
+  }) : null;
+
+  function start(){
+    scan();
+    new MutationObserver(function(muts){
+      for (var i = 0; i < muts.length; i++) {
+        var t = muts[i].target;
+        if (t.nodeType === 1 && t.closest && t.closest('.shred-layer')) continue;
+        queueScan(); return;
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('scroll', kick, { passive: true });
+    window.addEventListener('resize', function(){ items.slice().forEach(function(it){ var c = it.cur; build(it.el); var nw = find(it.el); if (nw) { nw.cur = c; paint(nw); } }); kick(); });
+  }
+  var fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+  var timeout = new Promise(function(r){ setTimeout(r, 2500); });
+  Promise.race([fontsReady, timeout]).then(function(){
+    var tries = 0;
+    (function wait(){
+      if ((document.body && tag()) || tries++ > 80) return start();
+      setTimeout(wait, 50);
+    })();
+  });
+})();
+</script>
+<!-- shred:end -->

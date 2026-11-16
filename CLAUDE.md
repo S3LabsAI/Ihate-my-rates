@@ -19,6 +19,10 @@ The outer document is only a loader. The real page is stored in `<script>` data 
 
 At load, the bootstrap script decodes the manifest into blob/data URLs, replaces each UUID in the template, and swaps the template in as `document.documentElement`. The support runtime (manifest asset `b6f0ab93-…`, loaded by the template's first `<script src>`) then renders the `<x-dc>` component with React.
 
+**Editing workflow:** `python3 tools/bundle.py unpack` writes the decoded template to `build/template.html` (git-ignored); edit that, then `python3 tools/bundle.py pack` writes it back into `index.html` with `</` escaped.
+
+**Scroll headline animation:** `src/shred.html` is the source for the sliced-letter effect on the hero H1 and the "Cheap rate.", "How we shop it." and "Low price." H2s. It is pasted into the template `<head>` between the `<!-- shred:start -->` and `<!-- shred:end -->` markers. Two runtime quirks shaped it: the x-dc runtime discards anything in `<body>` outside `<x-dc>` and drops unknown attributes such as `data-*`, so the script lives in `<head>` and finds the headings by tag and text, then tags them itself. The real heading text stays in the DOM (hidden with `-webkit-text-fill-color` while an `aria-hidden` overlay animates) and is shown again once assembled. It is skipped under `prefers-reduced-motion`.
+
 **Editing:** the template is an escaped JSON string inside a 690 KB line-oriented file, so don't make text replacements in the outer file blindly. Do this instead: parse the `__bundler/template` island with `json.loads`, edit the decoded HTML, then write it back with `json.dumps`. Make sure the result contains no literal `</script>` (escape it as `<\/script>`). Edit assets the same way: base64-decode, gunzip if `compressed`, change, re-encode. Keep the UUIDs stable. Keep the OFL font-license comment at the top of the file, because it is required when the file is redistributed.
 
 ## Template language (`<x-dc>` component format)
